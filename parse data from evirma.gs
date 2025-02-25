@@ -1,16 +1,70 @@
-﻿// Весь код ниже парсит с эвирмы нужные данные и вставляет в заданные места в гугл-таблице. Переменные для настройки ниже. Имя функции для вызова parseEvirmaAndWriteToSheet.
+﻿// Метод для запуска - main. Код берёт настройки запуска из листа "Настройки" и заполняет данными за вчера листы.
+// Данные берутся за дату в формате дд.мм.гггг из ячейки С13 
+// Перед запуском убедиться что ячейка с текстом Размеры (кол-во) находится на строке 114
+// Данные для запуска (имена листов и артикулы) заполняются в листе Настройки начиная с ячейки B22
 
 // ID вашей Google Таблицы (можно взять из URL)
-var spreadsheetId = 'spreadsheet id';
-// Название листа
-var sheetName = 'sheet name';
-// Артикул
-var article = 'product article';
+var spreadsheetId = 'id';
 // Куки
-var cookie = "cookie";
+var cookie = 'cookie';
 // Переменные, в которые записываются данные
-var dataFromEvirmaJson, whs, sizes;
-// Данные берутся за дату в формате дд.мм.гггг из ячейки С13 
+var dataFromEvirmaDictionary, whs, sizes, jsonFromEvirma, productsToProcess;
+
+function main() {
+  getProductsToProcess();
+  for (var product of productsToProcess) {
+    try {
+      var sheetName = product[0];
+      var article = product[1];
+      createSpaceForYesterdayData(sheetName);
+      fetchDataFromEvirma(article);
+      writeDataForDateToSheet(sheetName);
+      Logger.log(`успешно обработан лист ${sheetName}, артикул ${article}`);
+    }
+    catch (error){
+      Logger.log(`Ошибка при обработке листа ${sheetName} артикула ${article}: ${error.message}.`);
+    }
+  }
+}
+
+// получить имена листов и артикулы из листа "настройки" начиная с ячейки B22
+function getProductsToProcess() {
+  var products = [];
+  var sheet = SpreadsheetApp.openById(spreadsheetId).getSheetByName('Настройки');
+  var row = 22;
+  var col = 2;
+  while (!sheet.getRange(row, col).isBlank()) {
+    var sheetName = sheet.getRange(row, col).getValue().toString();
+    var article = sheet.getRange(row + 1, col).getValue().toString();
+    products.push([sheetName, article]);
+    col++;
+  }
+  productsToProcess = products;
+}
+
+function createSpaceForYesterdayData(sheetName) {
+  var spreadsheet = SpreadsheetApp.openById(spreadsheetId);
+  var sheet = spreadsheet.getSheetByName(sheetName);
+
+  sheet.insertColumnsBefore(3, 6);
+  var rangeToCopy = sheet.getRange('I1:N199');
+  var targetRange = sheet.getRange("C1");
+  rangeToCopy.copyTo(targetRange, { contentsOnly: false });
+
+  var range = sheet.getRange("C93:D113");
+  range.clearContent();
+  range = sheet.getRange('C115:D121');
+  range.clearContent();
+
+  var today = new Date();
+  var yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
+  var month = String(yesterday.getMonth() + 1).padStart(2, '0');
+  var day = String(yesterday.getDate()).padStart(2, '0');
+  var year = yesterday.getFullYear();
+  var formattedDate = `${day}.${month}.${year}`;
+  var dateRange = sheet.getRange('C13:F13');
+  dateRange.setValue(formattedDate);
+}
 
 function fetchDataFromEvirma(article) {
   var url = "https://evirma.ru/api/server/article/promo-journal/data2";
@@ -42,7 +96,7 @@ function fetchDataFromEvirma(article) {
 
   var response = UrlFetchApp.fetch(url, options);
   var result = response.getContentText();
-  return result;
+  jsonFromEvirma = result;
 }
 
 function findNodeByValue(obj, searchString) {
@@ -91,7 +145,7 @@ function parseDataForDate(json, dateString) {
   let yearString = dateString.substring(6, 10);
   let evirmaDateString = `${yearString}-${monthString}-${dayString}`;
 
-  dataFromEvirmaJson = {
+  dataFromEvirmaDictionary = {
     'trafikVsegoPerehodov': [`open-card-count-${evirmaDateString}`, undefined],
     'trafikReklama': [`total-advt-clicks-count-${evirmaDateString}`, undefined],
     'trafikVneshka': [`article-freq-${evirmaDateString}`, undefined],
@@ -133,10 +187,10 @@ function parseDataForDate(json, dateString) {
     'naOdnuProdajuDenegNaReklamu': [`per1-sale-advt-sum-rub-${evirmaDateString}`, undefined]
   };
 
-  Object.keys(dataFromEvirmaJson).forEach(key => {
-    let hash = dataFromEvirmaJson[key][0];
+  Object.keys(dataFromEvirmaDictionary).forEach(key => {
+    let hash = dataFromEvirmaDictionary[key][0];
     let value = findNodeByValue(parsedJson, hash).value;
-    dataFromEvirmaJson[key][1] = value;
+    dataFromEvirmaDictionary[key][1] = value;
   });
 
   whs = parseNameAndValueFromItems(`whs-${evirmaDateString}`, parsedJson);
@@ -161,9 +215,7 @@ function writeDataColumnToSheet(sheet, startCell, dataColumn) {
   }
 }
 
-function parseEvirmaAndWriteToSheet() {
-  var jsonFromEvirma = fetchDataFromEvirma(article);
-
+function writeDataForDateToSheet(sheetName) {
   var spreadsheet = SpreadsheetApp.openById(spreadsheetId);
   var sheet = spreadsheet.getSheetByName(sheetName);
   let dateString = sheet.getRange('C13').getDisplayValue();
@@ -171,75 +223,75 @@ function parseEvirmaAndWriteToSheet() {
   parseDataForDate(jsonFromEvirma, dateString);
 
   var valuesToInsert = [
-    dataFromEvirmaJson['trafikVsegoPerehodov'][1],
-    dataFromEvirmaJson['trafikReklama'][1],
-    dataFromEvirmaJson['trafikVneshka'][1],
-    dataFromEvirmaJson['trafikOrganika'][1]
+    dataFromEvirmaDictionary['trafikVsegoPerehodov'][1],
+    dataFromEvirmaDictionary['trafikReklama'][1],
+    dataFromEvirmaDictionary['trafikVneshka'][1],
+    dataFromEvirmaDictionary['trafikOrganika'][1]
   ];
   writeDataColumnToSheet(sheet, 'C15', valuesToInsert);
 
   var valuesToInsert = [
-    dataFromEvirmaJson['osnovnieMetrikiKorzini'][1],
-    dataFromEvirmaJson['osnovnieMetrikiZakazi'][1],
-    dataFromEvirmaJson['osnovnieMetrikiProdaji'][1],
-    dataFromEvirmaJson['osnovnieMetrikiZakaziSumma'][1],
-    dataFromEvirmaJson['osnovnieMetrikiProdajiSumma'][1],
-    `${dataFromEvirmaJson['osnovnieMetrikiDrrZakazi'][1]}%`.replace('.', ','),
-    `${dataFromEvirmaJson['osnovnieMetrikiDrrProdaji'][1]}%`.replace('.', ',')
+    dataFromEvirmaDictionary['osnovnieMetrikiKorzini'][1],
+    dataFromEvirmaDictionary['osnovnieMetrikiZakazi'][1],
+    dataFromEvirmaDictionary['osnovnieMetrikiProdaji'][1],
+    dataFromEvirmaDictionary['osnovnieMetrikiZakaziSumma'][1],
+    dataFromEvirmaDictionary['osnovnieMetrikiProdajiSumma'][1],
+    `${dataFromEvirmaDictionary['osnovnieMetrikiDrrZakazi'][1]}%`.replace('.', ','),
+    `${dataFromEvirmaDictionary['osnovnieMetrikiDrrProdaji'][1]}%`.replace('.', ',')
   ];
   writeDataColumnToSheet(sheet, 'C22', valuesToInsert);
 
-  var valuesToInsert = [`${dataFromEvirmaJson['akcii'][1]}`];
+  var valuesToInsert = [`${dataFromEvirmaDictionary['akcii'][1]}`];
   writeDataRowToSheet(sheet, 'C36', valuesToInsert);
 
   var valuesToInsert = [
-    dataFromEvirmaJson['akciiReiting'][1],
-    dataFromEvirmaJson['akciiOtzivi'][1]
+    dataFromEvirmaDictionary['akciiReiting'][1],
+    dataFromEvirmaDictionary['akciiOtzivi'][1]
   ];
   writeDataRowToSheet(sheet, 'C37', valuesToInsert);
 
   var valuesToInsert = [
-    `${dataFromEvirmaJson['cenaSpp'][1]}%`.replace('.', ','),
-    dataFromEvirmaJson['cenaDoSpp'][1]
+    `${dataFromEvirmaDictionary['cenaSpp'][1]}%`.replace('.', ','),
+    dataFromEvirmaDictionary['cenaDoSpp'][1]
   ];
   writeDataColumnToSheet(sheet, 'C40', valuesToInsert);
 
-  var valuesToInsert = [`${dataFromEvirmaJson['konversiiMoyaProcentVikupa'][1]}%`.replace('.', ',')];
+  var valuesToInsert = [`${dataFromEvirmaDictionary['konversiiMoyaProcentVikupa'][1]}%`.replace('.', ',')];
   writeDataRowToSheet(sheet, 'C54', valuesToInsert);
 
   var valuesToInsert = [
-    dataFromEvirmaJson['konversiiTop12PerehodKorzina'][1],
-    dataFromEvirmaJson['konversiiTop12KorzinaZakaz'][1],
-    dataFromEvirmaJson['konversiiTop12PerehodZakaz'][1],
-    dataFromEvirmaJson['konversiiTop12ProcentVikupa'][1],
-    dataFromEvirmaJson['konversiiTop12PerehodVikup'][1]
+    dataFromEvirmaDictionary['konversiiTop12PerehodKorzina'][1],
+    dataFromEvirmaDictionary['konversiiTop12KorzinaZakaz'][1],
+    dataFromEvirmaDictionary['konversiiTop12PerehodZakaz'][1],
+    dataFromEvirmaDictionary['konversiiTop12ProcentVikupa'][1],
+    dataFromEvirmaDictionary['konversiiTop12PerehodVikup'][1]
   ];
   writeDataColumnToSheet(sheet, 'E51', valuesToInsert);
 
   var valuesToInsert = [
-    dataFromEvirmaJson['konversiiSrednyayaPerehodKorzina'][1],
-    dataFromEvirmaJson['konversiiSrednyayaKorzinaZakaz'][1],
-    dataFromEvirmaJson['konversiiSrednyayaPerehodZakaz'][1],
-    dataFromEvirmaJson['konversiiSrednyayaProcentVikupa'][1],
-    dataFromEvirmaJson['konversiiSrednyayaPerehodVikup'][1]
+    dataFromEvirmaDictionary['konversiiSrednyayaPerehodKorzina'][1],
+    dataFromEvirmaDictionary['konversiiSrednyayaKorzinaZakaz'][1],
+    dataFromEvirmaDictionary['konversiiSrednyayaPerehodZakaz'][1],
+    dataFromEvirmaDictionary['konversiiSrednyayaProcentVikupa'][1],
+    dataFromEvirmaDictionary['konversiiSrednyayaPerehodVikup'][1]
   ];
   writeDataColumnToSheet(sheet, 'G51', valuesToInsert);
 
   var valuesToInsert = [
-    dataFromEvirmaJson['reklamaZatratiAvto'][1],
-    dataFromEvirmaJson['reklamaZatratiPoisk'][1]
+    dataFromEvirmaDictionary['reklamaZatratiAvto'][1],
+    dataFromEvirmaDictionary['reklamaZatratiPoisk'][1]
   ];
   writeDataRowToSheet(sheet, 'E60', valuesToInsert);
 
   var valuesToInsert = [
-    dataFromEvirmaJson['reklamaProsmotriAvto'][1],
-    dataFromEvirmaJson['reklamaProsmotriPoisk'][1]
+    dataFromEvirmaDictionary['reklamaProsmotriAvto'][1],
+    dataFromEvirmaDictionary['reklamaProsmotriPoisk'][1]
   ];
   writeDataRowToSheet(sheet, 'E62', valuesToInsert);
 
   var valuesToInsert = [
-    dataFromEvirmaJson['reklamaKlikiAvto'][1],
-    dataFromEvirmaJson['reklamaKlikiPoisk'][1]
+    dataFromEvirmaDictionary['reklamaKlikiAvto'][1],
+    dataFromEvirmaDictionary['reklamaKlikiPoisk'][1]
   ];
   writeDataRowToSheet(sheet, 'E63', valuesToInsert);
 
@@ -253,23 +305,23 @@ function parseEvirmaAndWriteToSheet() {
 
   var valuesToInsert = [];
   sizes.forEach(size => valuesToInsert.push([size.name, size.value]));
-  var startCell = sheet.getRange('C109');
+  var startCell = sheet.getRange('C115');
   var startRow = startCell.getRow();
   var startCol = startCell.getColumn();
   var range = sheet.getRange(startRow, startCol, valuesToInsert.length, valuesToInsert[0].length);
   range.setValues(valuesToInsert);
 
   var valuesToInsert = [
-    dataFromEvirmaJson['kajdiiPosetitelPrinositVZakazah'][1],
-    dataFromEvirmaJson['kajdiiPosetitelPrinositVProdajah'][1]
+    dataFromEvirmaDictionary['kajdiiPosetitelPrinositVZakazah'][1],
+    dataFromEvirmaDictionary['kajdiiPosetitelPrinositVProdajah'][1]
   ];
-  writeDataColumnToSheet(sheet, 'C117', valuesToInsert);
+  writeDataColumnToSheet(sheet, 'C123', valuesToInsert);
 
   var valuesToInsert = [
-    dataFromEvirmaJson['naOdnuProdajuPerehodovVKartochku'][1],
-    dataFromEvirmaJson['naOdnuProdajuKorzin'][1],
-    dataFromEvirmaJson['naOdnuProdajuZakazov'][1],
-    dataFromEvirmaJson['naOdnuProdajuDenegNaReklamu'][1]
+    dataFromEvirmaDictionary['naOdnuProdajuPerehodovVKartochku'][1],
+    dataFromEvirmaDictionary['naOdnuProdajuKorzin'][1],
+    dataFromEvirmaDictionary['naOdnuProdajuZakazov'][1],
+    dataFromEvirmaDictionary['naOdnuProdajuDenegNaReklamu'][1]
   ];
-  writeDataColumnToSheet(sheet, 'C121', valuesToInsert);
+  writeDataColumnToSheet(sheet, 'C127', valuesToInsert);
 }
